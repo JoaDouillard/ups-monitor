@@ -1,0 +1,42 @@
+[Unit]
+Description=UPS Monitor — Eaton 5PX 3000i RT2U G2
+Documentation=https://github.com/your-org/ups-monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=upsmonitor
+Group=upsmonitor
+WorkingDirectory=/opt/ups-monitor
+
+# Charge le fichier .env
+EnvironmentFile=/opt/ups-monitor/.env
+
+# Lance l'application via uvicorn
+ExecStart=/opt/ups-monitor/venv/bin/uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --workers 1 \
+    --log-level info \
+    --access-log
+
+# Redémarrage automatique sur crash
+Restart=on-failure
+RestartSec=10s
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Sécurité
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ups-monitor
+ProtectHome=true
+
+# Limites
+LimitNOFILE=65536
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

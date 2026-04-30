@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UPS Monitor — Eaton 5PX</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ============================================================
+     ÉCRAN DE LOGIN
+     ============================================================ -->
+<div id="login-screen" class="login-overlay hidden">
+  <div class="login-box">
+    <div class="login-logo">
+      <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" width="48" height="48">
+        <rect width="48" height="48" rx="10" fill="#1a6bab"/>
+        <path d="M24 8L12 28h10v12l14-20H26V8z" fill="white"/>
+      </svg>
+    </div>
+    <h1>UPS Monitor</h1>
+    <p class="login-subtitle">Eaton 5PX 3000i RT2U G2</p>
+    <form id="login-form">
+      <div class="field">
+        <label>Utilisateur</label>
+        <input type="text" id="login-user" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label>Mot de passe</label>
+        <input type="password" id="login-pass" autocomplete="current-password" required />
+      </div>
+      <div id="login-error" class="error-msg hidden"></div>
+      <button type="submit" class="btn-primary">Connexion</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================
+     APPLICATION PRINCIPALE
+     ============================================================ -->
+<div id="app" class="hidden">
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+        <rect width="48" height="48" rx="8" fill="#1a6bab"/>
+        <path d="M24 8L12 28h10v12l14-20H26V8z" fill="white"/>
+      </svg>
+      <div>
+        <span class="app-title">UPS Monitor</span>
+        <span id="ups-model" class="ups-model-label"></span>
+      </div>
+    </div>
+    <div class="topbar-center">
+      <div id="status-badge" class="status-badge status-unknown">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text">Chargement…</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="last-update" class="last-update"></span>
+      <button id="btn-logout" class="btn-link">Déconnexion</button>
+    </div>
+  </header>
+
+  <!-- Contenu principal -->
+  <main class="main-content">
+
+    <!-- Navigation par onglets -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">Tableau de bord</button>
+      <button class="tab" data-tab="history">Historique</button>
+      <button class="tab" data-tab="alerts">
+        Alertes <span id="alert-badge" class="badge hidden">0</span>
+      </button>
+      <button class="tab" data-tab="info">Infos UPS</button>
+    </nav>
+
+    <!-- ========== ONGLET : TABLEAU DE BORD ========== -->
+    <section id="tab-dashboard" class="tab-content active">
+
+      <!-- Cartes métriques clés -->
+      <div class="metrics-grid">
+        <div class="metric-card card-battery">
+          <div class="metric-icon">🔋</div>
+          <div class="metric-body">
+            <div class="metric-value" id="m-bat-capacity">—</div>
+            <div class="metric-label">Batterie</div>
+            <div class="metric-bar">
+              <div class="metric-bar-fill" id="m-bat-bar"></div>
+            </div>
+            <div class="metric-sub" id="m-bat-status">—</div>
+          </div>
+        </div>
+
+        <div class="metric-card card-runtime">
+          <div class="metric-icon">⏱️</div>
+          <div class="metric-body">
+            <div class="metric-value" id="m-runtime">—</div>
+            <div class="metric-label">Autonomie</div>
+            <div class="metric-sub" id="m-bat-voltage">—</div>
+          </div>
+        </div>
+
+        <div class="metric-card card-load">
+          <div class="metric-icon">⚡</div>
+          <div class="metric-body">
+            <div class="metric-value" id="m-load">—</div>
+            <div class="metric-label">Charge</div>
+            <div class="metric-bar">
+              <div class="metric-bar-fill" id="m-load-bar"></div>
+            </div>
+            <div class="metric-sub" id="m-power-watts">—</div>
+          </div>
+        </div>
+
+        <div class="metric-card card-output">
+          <div class="metric-icon">🔌</div>
+          <div class="metric-body">
+            <div class="metric-value" id="m-output-source">—</div>
+            <div class="metric-label">Source</div>
+            <div class="metric-sub" id="m-output-status">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Graphiques -->
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="chart-title">Batterie & Charge (24h)</div>
+          <canvas id="chart-main" height="140"></canvas>
+        </div>
+        <div class="chart-card chart-card-sm">
+          <div class="chart-title">Tension E/S (24h)</div>
+          <canvas id="chart-voltage" height="140"></canvas>
+        </div>
+      </div>
+
+      <!-- Détails en grille -->
+      <div class="details-grid">
+        <!-- Entrée -->
+        <div class="detail-panel">
+          <div class="panel-title">Entrée secteur</div>
+          <table class="data-table">
+            <tr><td>Tension</td><td id="d-input-voltage">—</td></tr>
+            <tr><td>Fréquence</td><td id="d-input-frequency">—</td></tr>
+            <tr><td>Source</td><td id="d-input-source">—</td></tr>
+            <tr><td>État</td><td id="d-input-status">—</td></tr>
+          </table>
+        </div>
+
+        <!-- Sortie -->
+        <div class="detail-panel">
+          <div class="panel-title">Sortie</div>
+          <table class="data-table">
+            <tr><td>Tension</td><td id="d-output-voltage">—</td></tr>
+            <tr><td>Fréquence</td><td id="d-output-frequency">—</td></tr>
+            <tr><td>Puissance</td><td id="d-output-watts">—</td></tr>
+            <tr><td>Puissance app.</td><td id="d-output-va">—</td></tr>
+          </table>
+        </div>
+
+        <!-- Batterie détail -->
+        <div class="detail-panel">
+          <div class="panel-title">Batterie (détail)</div>
+          <table class="data-table">
+            <tr><td>Capacité</td><td id="d-bat-capacity">—</td></tr>
+            <tr><td>Autonomie</td><td id="d-bat-runtime">—</td></tr>
+            <tr><td>Tension DC</td><td id="d-bat-voltage">—</td></tr>
+            <tr><td>Défaut</td><td id="d-bat-failure">—</td></tr>
+            <tr><td>Vieillie</td><td id="d-bat-aged">—</td></tr>
+            <tr><td>Alarmes actives</td><td id="d-alarm-count">—</td></tr>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== ONGLET : HISTORIQUE ========== -->
+    <section id="tab-history" class="tab-content hidden">
+      <div class="toolbar">
+        <label>Période :
+          <select id="history-range">
+            <option value="6">6 heures</option>
+            <option value="24" selected>24 heures</option>
+            <option value="72">3 jours</option>
+            <option value="168">7 jours</option>
+            <option value="720">30 jours</option>
+          </select>
+        </label>
+        <button class="btn-secondary" id="btn-refresh-history">Actualiser</button>
+      </div>
+      <div class="chart-card chart-card-full">
+        <canvas id="chart-history-bat" height="120"></canvas>
+      </div>
+      <div class="chart-card chart-card-full" style="margin-top:12px">
+        <canvas id="chart-history-load" height="120"></canvas>
+      </div>
+      <div class="chart-card chart-card-full" style="margin-top:12px">
+        <canvas id="chart-history-voltage" height="120"></canvas>
+      </div>
+    </section>
+
+    <!-- ========== ONGLET : ALERTES ========== -->
+    <section id="tab-alerts" class="tab-content hidden">
+      <div id="alerts-container">
+        <p class="empty-msg">Chargement…</p>
+      </div>
+    </section>
+
+    <!-- ========== ONGLET : INFOS UPS ========== -->
+    <section id="tab-info" class="tab-content hidden">
+      <div class="detail-panel" style="max-width:480px;margin:0 auto">
+        <div class="panel-title">Identification de l'onduleur</div>
+        <table class="data-table" id="info-table">
+          <tr><td>Fabricant</td><td id="i-manufacturer">—</td></tr>
+          <tr><td>Modèle</td><td id="i-model">—</td></tr>
+          <tr><td>N° de série</td><td id="i-serial">—</td></tr>
+          <tr><td>Firmware</td><td id="i-firmware">—</td></tr>
+          <tr><td>Puissance nominale</td><td id="i-rated-power">—</td></tr>
+          <tr><td>Batterie remplacée le</td><td id="i-bat-replaced">—</td></tr>
+        </table>
+      </div>
+      <div class="detail-panel" style="max-width:480px;margin:24px auto 0">
+        <div class="panel-title">Configuration SNMP</div>
+        <table class="data-table">
+          <tr><td>Hôte UPS</td><td id="i-ups-host"></td></tr>
+          <tr><td>Intervalle polling</td><td id="i-poll-interval"></td></tr>
+          <tr><td>Protocole auth.</td><td id="i-snmp-auth"></td></tr>
+          <tr><td>Protocole chiffrement</td><td id="i-snmp-priv"></td></tr>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <span>UPS Monitor · Eaton 5PX 3000i RT2U G2</span>
+    <span id="footer-serial"></span>
+  </footer>
+
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
