@@ -89,7 +89,8 @@ if [ -z "$PYTHON_BIN" ]; then
         PYTHON_BIN="python3.8"
     elif [ "$PKG_MGR" = "apt" ]; then
         apt-get update -q
-        apt-get install -y -q python3 python3-pip python3-venv python3-dev
+        apt-get install -y -q python3 python3-pip python3-venv python3-dev ca-certificates
+        update-ca-certificates
         PYTHON_BIN="python3"
     else
         fail "Impossible d'installer Python automatiquement."
@@ -186,38 +187,44 @@ else
     ok "Virtualenv existant : $VENV_DIR"
 fi
 
-# ── Détection proxy SSL (certificat auto-signé en entreprise) ──────────────
-# Teste si pip peut joindre PyPI normalement.
-# Si SSL échoue → active --trusted-host sur tous les pip install suivants
-# et écrit un pip.conf persistant dans le venv.
+# ── Vérification SSL et configuration pip ──────────────────────────────────
+# Test SSL réel : on essaie de joindre PyPI avec Python (même moteur que pip).
+# Si ça échoue → on écrit un pip.conf avec trusted-host dans le venv.
 PIP_FLAGS=""
 
-SSL_TEST=$("$PIP" install --dry-run pip 2>&1 || true)
-if echo "$SSL_TEST" | grep -q "SSLError\|CERTIFICATE_VERIFY_FAILED\|certificate verify failed"; then
-    warn "Proxy SSL détecté (certificat auto-signé) — activation du mode trusted-host"
+info "Test de la connectivité SSL vers PyPI..."
+SSL_OK=true
+SSL_TEST=$("$PYTHON_VENV" -c \
+    "import urllib.request, ssl; urllib.request.urlopen('https://pypi.org/simple/', timeout=10)" \
+    2>&1) || SSL_OK=false
+
+if $SSL_OK; then
+    ok "SSL PyPI accessible — certificats OK"
+else
+    # Problème SSL (proxy inspection, CA manquant, bundle corrompu…)
+    warn "SSL PyPI inaccessible — écriture d'un pip.conf avec trusted-host"
     PIP_FLAGS="--trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"
 
-    # Ecrit pip.conf dans le venv pour que ce soit persistant
-    mkdir -p "$VENV_DIR/pip"
-    cat > "$VENV_DIR/pip/pip.conf" << 'PIPCONF'
+    # Emplacement standard du pip.conf dans un venv
+    PIP_CONF_DIR="$VENV_DIR/etc/pip"
+    mkdir -p "$PIP_CONF_DIR"
+    cat > "$PIP_CONF_DIR/pip.conf" << 'PIPCONF'
 [global]
 trusted-host =
     pypi.org
     pypi.python.org
     files.pythonhosted.org
 PIPCONF
-    # pip cherche aussi dans ce chemin selon la version
-    mkdir -p "$VENV_DIR/etc/pip"
-    cp "$VENV_DIR/pip/pip.conf" "$VENV_DIR/etc/pip/pip.conf"
-    # Et dans le répertoire standard pip
+    ok "pip.conf écrit dans $PIP_CONF_DIR/pip.conf"
+
+    # Variables d'environnement pour la session courante
     export PIP_TRUSTED_HOST="pypi.org pypi.python.org files.pythonhosted.org"
-    ok "Mode trusted-host activé (proxy SSL contourné)"
 fi
 
-# Mise à jour pip
+# Mise à jour pip (silencieuse si déjà à jour)
 info "Mise à jour de pip..."
 # shellcheck disable=SC2086
-"$PIP" install --quiet --upgrade pip $PIP_FLAGS
+"$PIP" install --quiet --upgrade pip $PIP_FLAGS 2>/dev/null || true
 ok "pip $($PIP --version | awk '{print $2}')"
 echo ""
 
