@@ -108,10 +108,30 @@ Variables **optionnelles** :
 > cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
 > ```
 
-### 4. Démarrer
+### 4. Ouvrir le port 8080 dans le firewall
+
+**Ubuntu (ufw) :**
+```bash
+ufw allow 8080/tcp
+ufw status
+```
+
+**XenServer / CentOS 7 (firewalld) :**
+```bash
+firewall-cmd --permanent --add-port=8080/tcp
+firewall-cmd --reload
+```
+
+**CentOS 7 sans firewalld (iptables) :**
+```bash
+iptables -I INPUT -p tcp --dport 8080 -j ACCEPT
+service iptables save
+```
+
+### 5. Démarrer
 
 ```bash
-sudo bash check_install.sh   # relancer pour vérifier la config .env et démarrer le service
+sudo bash check_install.sh   # relancer pour vérifier la config .env
 systemctl start ups-monitor
 systemctl status ups-monitor
 ```
@@ -270,8 +290,13 @@ journalctl -u ups-monitor -n 50
 
 **SNMP ne répond pas**
 ```bash
-# Tester manuellement (installer snmpwalk)
+# XenServer / CentOS 7
 yum install net-snmp-utils
+
+# Ubuntu / Debian
+apt-get install snmp
+
+# Test
 snmpwalk -v3 -u SNMP_USER -l authPriv \
   -a SHA -A SNMP_AUTH_KEY \
   -x AES -X SNMP_PRIV_KEY \

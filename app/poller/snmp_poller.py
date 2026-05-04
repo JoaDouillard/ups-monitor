@@ -1,6 +1,6 @@
 """
 Poller SNMP asynchrone — SNMPv3 avec authentification SHA et chiffrement AES.
-Utilise pysnmp (lextudio fork, v6.x).
+Utilise pysnmp (lextudio fork, v7.x) — API snake_case.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pysnmp.hlapi.v3arch.asyncio import (
     ContextData,
     ObjectType,
     ObjectIdentity,
-    getCmd,
+    get_cmd,
 )
 from pysnmp.proto.rfc1902 import OctetString, Integer, Gauge32, Counter32, TimeTicks
 
@@ -65,7 +65,7 @@ async def _get_one(
     oid_def: OIDDef,
 ) -> tuple[str, Any]:
     """Interroge un unique OID et renvoie (name, valeur convertie)."""
-    error_indication, error_status, error_index, var_binds = await getCmd(
+    error_indication, error_status, error_index, var_binds = await get_cmd(
         engine,
         user_data,
         transport,
@@ -140,7 +140,10 @@ async def poll_ups() -> Optional[dict[str, Any]]:
     if failed:
         logger.warning("OIDs non disponibles : %s", ", ".join(failed))
 
-    engine.closeDispatcher()
+    try:
+        engine.closeDispatcher()
+    except Exception:
+        pass
     return result
 
 
@@ -180,5 +183,8 @@ async def get_ups_info() -> dict[str, Any]:
             logger.warning("Info OID %s failed: %s", oid_def.name, exc)
             info[oid_def.name] = None
 
-    engine.closeDispatcher()
+    try:
+        engine.closeDispatcher()
+    except Exception:
+        pass
     return info
