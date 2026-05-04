@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================
 #  UPS Monitor — Vérification et installation des dépendances
-#  Usage : bash check_install.sh
-#  Compatible : XenServer / XCP-ng (CentOS 7), Debian/Ubuntu
+#  Usage : sudo bash check_install.sh
+#  Compatible : XenServer / XCP-ng (CentOS 7) et Ubuntu/Debian
 # ============================================================
 
 set -euo pipefail
@@ -29,11 +29,12 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 
 ERRORS=0
+PLATFORM="unknown"  # xenserver | ubuntu | debian | centos | unknown
 
 # ─────────────────────────────────────────────
 # 1. Détection OS + gestionnaire de paquets
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[1/6] Système d'exploitation${RESET}"
+echo -e "${BOLD}[1/8] Système d'exploitation${RESET}"
 
 if [ -f /etc/os-release ]; then
     . /etc/os-release
@@ -44,7 +45,18 @@ else
     OS_ID="unknown"
 fi
 
-if command -v yum &>/dev/null; then
+# Détection précise de XenServer / XCP-ng
+if [ -f /etc/xensource-inventory ] || grep -qi "xenserver\|xcp-ng" /etc/os-release 2>/dev/null; then
+    PLATFORM="xenserver"
+elif [[ "$OS_ID" == "ubuntu" ]]; then
+    PLATFORM="ubuntu"
+elif [[ "$OS_ID" == "debian" ]]; then
+    PLATFORM="debian"
+elif [[ "$OS_ID" == "centos" ]] || [[ "$OS_ID" == "rhel" ]]; then
+    PLATFORM="centos"
+fi
+
+if command -v yum &>/dev/null && ! command -v apt-get &>/dev/null; then
     PKG_MGR="yum"
 elif command -v apt-get &>/dev/null; then
     PKG_MGR="apt"
@@ -54,15 +66,27 @@ fi
 
 ok "OS détecté : $OS_NAME"
 ok "Gestionnaire de paquets : $PKG_MGR"
+
+# Note spécifique à la plateforme
+if [ "$PLATFORM" = "xenserver" ]; then
+    echo -e "  ${CYAN}ℹ${RESET}  Plateforme : XenServer/XCP-ng (dom0 CentOS) — mode XenServer activé"
+    echo -e "  ${CYAN}ℹ${RESET}  Le script utilisera yum + dépôt IUS pour Python 3.8"
+elif [ "$PLATFORM" = "ubuntu" ] || [ "$PLATFORM" = "debian" ]; then
+    echo -e "  ${CYAN}ℹ${RESET}  Plateforme : ${OS_NAME} — mode Linux standard"
+    echo -e "  ${CYAN}ℹ${RESET}  Le script utilisera apt pour les dépendances système"
+else
+    warn "Plateforme non reconnue — le script va tenter de continuer"
+fi
+
 echo ""
 
 # ─────────────────────────────────────────────
 # 2. Python 3.8+
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[2/6] Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR+${RESET}"
+echo -e "${BOLD}[2/8] Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR+${RESET}"
 
 PYTHON_BIN=""
-for candidate in python3.11 python3.10 python3.9 python3.8 python3; do
+for candidate in python3.12 python3.11 python3.10 python3.9 python3.8 python3; do
     if command -v "$candidate" &>/dev/null; then
         version=$("$candidate" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
         major=$(echo "$version" | cut -d. -f1)
@@ -78,12 +102,12 @@ done
 if [ -z "$PYTHON_BIN" ]; then
     fail "Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR+ introuvable !"
     echo ""
-    warn "Installation automatique de Python 3.8..."
+    warn "Installation automatique de Python..."
     if [ "$PKG_MGR" = "yum" ]; then
-        info "Ajout du dépôt IUS (Python 3.8 pour CentOS 7)..."
+        info "XenServer/CentOS 7 : ajout du dépôt IUS pour Python 3.8..."
         yum install -y -q epel-release 2>/dev/null || true
         if ! yum install -y -q https://repo.ius.io/ius-release-el7.rpm 2>/dev/null; then
-            warn "Dépôt IUS indisponible — essai avec epel..."
+            warn "Dépôt IUS indisponible — essai direct..."
         fi
         yum install -y python38 python38-pip python38-devel
         PYTHON_BIN="python3.8"
@@ -102,18 +126,15 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────
-# 3. Module venv (avec paquet système si besoin)
+# 3. Module venv
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[3/6] Module venv (environnement virtuel)${RESET}"
+echo -e "${BOLD}[3/8] Module venv (environnement virtuel)${RESET}"
 
 if [ "$PKG_MGR" = "apt" ]; then
-    # Sur Ubuntu/Debian, python3.X-venv seul ne suffit pas toujours :
-    # ensurepip peut être absent. python3.X-full ou python3-full est fiable.
     PY_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     FULL_PKG="python${PY_VERSION}-full"
     VENV_PKG="python${PY_VERSION}-venv"
 
-    # Essaie python3.X-full en priorité (inclut venv + ensurepip)
     if dpkg -l "$FULL_PKG" &>/dev/null 2>&1; then
         ok "Paquet $FULL_PKG déjà installé"
     else
@@ -122,7 +143,6 @@ if [ "$PKG_MGR" = "apt" ]; then
         if apt-get install -y -q "$FULL_PKG" 2>/dev/null; then
             ok "Paquet $FULL_PKG installé"
         else
-            # Fallback : python3.X-venv + python3-pip
             info "$FULL_PKG indisponible, fallback sur $VENV_PKG + python3-pip..."
             apt-get install -y -q "$VENV_PKG" python3-pip python3-setuptools
             ok "Paquets $VENV_PKG + python3-pip installés"
@@ -133,14 +153,14 @@ elif [ "$PKG_MGR" = "yum" ]; then
         warn "Module venv manquant — installation..."
         yum install -y python38-libs 2>/dev/null || true
     fi
-    ok "Module venv disponible"
+    ok "Module venv disponible (inclus avec Python 3.8 sur CentOS)"
 fi
 echo ""
 
 # ─────────────────────────────────────────────
 # 4. Environnement virtuel Python
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[4/6] Environnement virtuel${RESET}"
+echo -e "${BOLD}[4/8] Environnement virtuel${RESET}"
 
 PIP="$VENV_DIR/bin/pip"
 PYTHON_VENV="$VENV_DIR/bin/python"
@@ -154,12 +174,11 @@ fi
 if [ ! -d "$VENV_DIR" ]; then
     info "Création du virtualenv dans $VENV_DIR..."
 
-    # Tentative 1 : création normale (avec pip intégré via ensurepip)
+    # Tentative 1 : création normale
     if "$PYTHON_BIN" -m venv "$VENV_DIR" 2>/dev/null && [ -f "$PIP" ]; then
         ok "Virtualenv créé"
-
-    # Tentative 2 : sans pip intégré, bootstrap manuel via get-pip.py
     else
+        # Tentative 2 : bootstrap pip via get-pip.py
         warn "ensurepip indisponible — bootstrap pip manuel..."
         rm -rf "$VENV_DIR"
         "$PYTHON_BIN" -m venv --without-pip "$VENV_DIR"
@@ -169,8 +188,12 @@ if [ ! -d "$VENV_DIR" ]; then
         elif command -v wget &>/dev/null; then
             wget -qO /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py
         else
-            fail "curl et wget sont introuvables. Impossible de bootstrapper pip."
-            fail "Installez curl : apt install curl  puis relancez ce script."
+            fail "curl et wget introuvables. Impossible de bootstrapper pip."
+            if [ "$PKG_MGR" = "apt" ]; then
+                fail "Installez curl : apt-get install curl  puis relancez."
+            else
+                fail "Installez curl : yum install curl  puis relancez."
+            fi
             exit 1
         fi
 
@@ -187,25 +210,21 @@ else
     ok "Virtualenv existant : $VENV_DIR"
 fi
 
-# ── Vérification SSL et configuration pip ──────────────────────────────────
-# Test SSL réel : on essaie de joindre PyPI avec Python (même moteur que pip).
-# Si ça échoue → on écrit un pip.conf avec trusted-host dans le venv.
+# ── Vérification SSL ──────────────────────────────────────────────────────────
 PIP_FLAGS=""
 
 info "Test de la connectivité SSL vers PyPI..."
 SSL_OK=true
 SSL_TEST=$("$PYTHON_VENV" -c \
-    "import urllib.request, ssl; urllib.request.urlopen('https://pypi.org/simple/', timeout=10)" \
+    "import urllib.request; urllib.request.urlopen('https://pypi.org/simple/', timeout=10)" \
     2>&1) || SSL_OK=false
 
 if $SSL_OK; then
     ok "SSL PyPI accessible — certificats OK"
 else
-    # Problème SSL (proxy inspection, CA manquant, bundle corrompu…)
-    warn "SSL PyPI inaccessible — écriture d'un pip.conf avec trusted-host"
+    warn "SSL inaccessible — écriture d'un pip.conf avec trusted-host"
     PIP_FLAGS="--trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"
 
-    # Emplacement standard du pip.conf dans un venv
     PIP_CONF_DIR="$VENV_DIR/etc/pip"
     mkdir -p "$PIP_CONF_DIR"
     cat > "$PIP_CONF_DIR/pip.conf" << 'PIPCONF'
@@ -215,13 +234,10 @@ trusted-host =
     pypi.python.org
     files.pythonhosted.org
 PIPCONF
-    ok "pip.conf écrit dans $PIP_CONF_DIR/pip.conf"
-
-    # Variables d'environnement pour la session courante
+    ok "pip.conf écrit : $PIP_CONF_DIR/pip.conf"
     export PIP_TRUSTED_HOST="pypi.org pypi.python.org files.pythonhosted.org"
 fi
 
-# Mise à jour pip (silencieuse si déjà à jour)
 info "Mise à jour de pip..."
 # shellcheck disable=SC2086
 "$PIP" install --quiet --upgrade pip $PIP_FLAGS 2>/dev/null || true
@@ -229,25 +245,23 @@ ok "pip $($PIP --version | awk '{print $2}')"
 echo ""
 
 # ─────────────────────────────────────────────
-# 5. Vérification des paquets requirements.txt
+# 5. Paquets Python (requirements.txt)
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[5/6] Paquets Python (requirements.txt)${RESET}"
+echo -e "${BOLD}[5/8] Paquets Python (requirements.txt)${RESET}"
 
 if [ ! -f "$REQ_FILE" ]; then
     fail "requirements.txt introuvable dans $APP_DIR"
     exit 1
 fi
 
-# Liste les paquets installés dans le venv
 INSTALLED=$("$PIP" list --format=freeze 2>/dev/null | tr '[:upper:]' '[:lower:]')
-
 MISSING=()
 
 while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ ^#.*$ ]] && continue
     [[ -z "${line// }" ]] && continue
 
-    # Extrait le nom du paquet (avant >=, <=, ==, ~=, >, < et [extras])
+    # Supprime les extras [standard] et les spécificateurs de version >=...
     pkg_name=$(echo "$line" | sed 's/[><=!~].*//' | sed 's/\[.*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
 
     if echo "$INSTALLED" | grep -qi "^${pkg_name}"; then
@@ -261,7 +275,6 @@ done < "$REQ_FILE"
 
 echo ""
 
-# Installation des manquants
 if [ ${#MISSING[@]} -gt 0 ]; then
     warn "${#MISSING[@]} paquet(s) manquant(s) — installation en cours..."
     echo ""
@@ -269,7 +282,6 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     "$PIP" install $PIP_FLAGS "${MISSING[@]}"
     echo ""
 
-    # Vérification post-install
     for pkg in "${MISSING[@]}"; do
         pkg_name=$(echo "$pkg" | sed 's/[><=!~].*//' | sed 's/\[.*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
         if "$PIP" list --format=freeze 2>/dev/null | grep -qi "^${pkg_name}"; then
@@ -285,14 +297,74 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────
-# 6. Fichier .env
+# 6. Outils SSH (pour arrêt des VMs XenServer)
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[6/7] Configuration (.env)${RESET}"
+echo -e "${BOLD}[6/8] Outils SSH (arrêt automatique des VMs)${RESET}"
+
+SSH_MISSING=()
+SSHPASS_MISSING=()
+
+# Noms de paquets différents entre apt et yum
+if [ "$PKG_MGR" = "apt" ]; then
+    SSH_PKG="openssh-client"
+    SSHPASS_PKG="sshpass"
+elif [ "$PKG_MGR" = "yum" ]; then
+    SSH_PKG="openssh-clients"   # note le 's' sur CentOS/XenServer
+    SSHPASS_PKG="sshpass"       # disponible via EPEL (installé à l'étape 2)
+else
+    SSH_PKG="openssh-client"
+    SSHPASS_PKG="sshpass"
+fi
+
+if command -v ssh &>/dev/null; then
+    ok "ssh disponible ($(ssh -V 2>&1 | head -1))"
+else
+    warn "ssh introuvable — installation de $SSH_PKG..."
+    if [ "$PKG_MGR" = "apt" ]; then
+        apt-get install -y -q "$SSH_PKG"
+    elif [ "$PKG_MGR" = "yum" ]; then
+        yum install -y -q "$SSH_PKG"
+    fi
+    ok "ssh installé"
+fi
+
+if command -v sshpass &>/dev/null; then
+    ok "sshpass disponible"
+else
+    info "sshpass non installé — installation de $SSHPASS_PKG..."
+    INSTALL_OK=true
+    if [ "$PKG_MGR" = "apt" ]; then
+        apt-get install -y -q "$SSHPASS_PKG" 2>/dev/null || INSTALL_OK=false
+    elif [ "$PKG_MGR" = "yum" ]; then
+        # sshpass est dans EPEL (déjà activé à l'étape 2 si Python installé)
+        yum install -y -q "$SSHPASS_PKG" 2>/dev/null || INSTALL_OK=false
+    fi
+    if $INSTALL_OK && command -v sshpass &>/dev/null; then
+        ok "sshpass installé"
+    else
+        warn "sshpass non disponible — l'arrêt des VMs via mot de passe SSH ne fonctionnera pas"
+        warn "Alternative : configurez une clé SSH sans mot de passe entre ce serveur et XenServer"
+    fi
+fi
+
+if [ "$PLATFORM" = "xenserver" ]; then
+    echo -e "  ${CYAN}ℹ${RESET}  Sur XenServer dom0 : XENSERVER_HOST peut être 127.0.0.1 (machine locale)"
+    echo -e "  ${CYAN}ℹ${RESET}  Commande xe disponible localement — SSH vers soi-même nécessite une clé SSH"
+    echo -e "  ${CYAN}ℹ${RESET}  Pour activer : ssh-keygen -t rsa && cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys"
+else
+    echo -e "  ${CYAN}ℹ${RESET}  Sur Ubuntu : XENSERVER_HOST = IP de votre serveur XenServer distant"
+    echo -e "  ${CYAN}ℹ${RESET}  L'application se connectera en SSH pour arrêter les VMs"
+fi
+echo ""
+
+# ─────────────────────────────────────────────
+# 7. Fichier .env
+# ─────────────────────────────────────────────
+echo -e "${BOLD}[7/8] Configuration (.env)${RESET}"
 
 if [ -f "$APP_DIR/.env" ]; then
     ok ".env trouvé : $APP_DIR/.env"
 
-    # Vérifie les variables critiques
     check_var() {
         local var="$1"
         local val
@@ -310,6 +382,14 @@ if [ -f "$APP_DIR/.env" ]; then
     check_var "SNMP_PRIV_KEY"  || ERRORS=$((ERRORS + 1))
     check_var "SECRET_KEY"     || ERRORS=$((ERRORS + 1))
     check_var "ADMIN_PASSWORD" || ERRORS=$((ERRORS + 1))
+
+    # Info sur les variables optionnelles XenServer
+    XHOST=$(grep -E "^XENSERVER_HOST=" "$APP_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs)
+    if [ -z "$XHOST" ]; then
+        info "XENSERVER_HOST non configuré — arrêt automatique des VMs désactivé"
+    else
+        ok "XENSERVER_HOST configuré ($XHOST) — arrêt automatique des VMs activé"
+    fi
 else
     warn ".env manquant — création depuis le template..."
     cp "$APP_DIR/.env.example" "$APP_DIR/.env"
@@ -319,20 +399,16 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────
-# 7. Service systemd
+# 8. Service systemd
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[7/7] Service systemd${RESET}"
+echo -e "${BOLD}[8/8] Service systemd${RESET}"
 
-SERVICE_FILE="$APP_DIR/ups-monitor.service"
 SYSTEMD_DEST="/etc/systemd/system/ups-monitor.service"
 
-if [ ! -f "$SERVICE_FILE" ]; then
-    fail "Fichier ups-monitor.service introuvable dans $APP_DIR"
-    ERRORS=$((ERRORS + 1))
-elif ! command -v systemctl &>/dev/null; then
-    warn "systemctl introuvable — service non installé (environnement sans systemd ?)"
+if ! command -v systemctl &>/dev/null; then
+    warn "systemctl introuvable — service non installé"
+    warn "Lancez manuellement : $VENV_DIR/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080"
 else
-    # Génère le service avec le bon chemin venv dynamique
     cat > "$SYSTEMD_DEST" << EOF
 [Unit]
 Description=UPS Monitor — Eaton 5PX 3000i RT2U G2
@@ -357,8 +433,12 @@ EOF
 
     systemctl daemon-reload
     systemctl enable ups-monitor 2>/dev/null || true
-    ok "Service ups-monitor installé et activé"
-    ok "Fichier : $SYSTEMD_DEST"
+    ok "Service installé : $SYSTEMD_DEST"
+    ok "Service activé au démarrage"
+
+    if [ "$PLATFORM" = "xenserver" ]; then
+        echo -e "  ${CYAN}ℹ${RESET}  Sur XenServer : le service démarre automatiquement avec dom0"
+    fi
 fi
 echo ""
 
@@ -369,15 +449,24 @@ echo -e "${BOLD}═════════════════════�
 if [ "$ERRORS" -eq 0 ]; then
     echo -e "${GREEN}${BOLD}  ✔  Tout est en ordre — prêt à démarrer !${RESET}"
     echo ""
-    echo -e "  Démarrer :  ${CYAN}systemctl start ups-monitor${RESET}"
-    echo -e "  Statut   :  ${CYAN}systemctl status ups-monitor${RESET}"
-    echo -e "  Logs     :  ${CYAN}journalctl -u ups-monitor -f${RESET}"
-    echo -e "  Web      :  ${CYAN}http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'IP_SERVEUR'):8080${RESET}"
+    echo -e "  Plateforme  : ${CYAN}${OS_NAME}${RESET}"
+    echo -e "  Démarrer    :  ${CYAN}systemctl start ups-monitor${RESET}"
+    echo -e "  Statut      :  ${CYAN}systemctl status ups-monitor${RESET}"
+    echo -e "  Logs        :  ${CYAN}journalctl -u ups-monitor -f${RESET}"
+    echo -e "  Web         :  ${CYAN}http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'IP_SERVEUR'):8080${RESET}"
 else
     echo -e "${YELLOW}${BOLD}  ⚠  $ERRORS problème(s) à corriger avant le démarrage${RESET}"
     echo ""
-    echo -e "  Générer une SECRET_KEY : ${CYAN}python3 -c \"import secrets; print(secrets.token_hex(32))\"${RESET}"
-    echo -e "  Relancez ce script après correction : ${CYAN}bash check_install.sh${RESET}"
+    if grep -q "SECRET_KEY non configuré\|ADMIN_PASSWORD non configuré" <<< "$(grep -E "^(SECRET_KEY|ADMIN_PASSWORD)=" "$APP_DIR/.env" 2>/dev/null || echo '')"; then
+        true
+    fi
+    echo -e "  Générer une SECRET_KEY :"
+    echo -e "    ${CYAN}python3 -c \"import secrets; print(secrets.token_hex(32))\"${RESET}"
+    echo ""
+    echo -e "  Editer la configuration :"
+    echo -e "    ${CYAN}nano $APP_DIR/.env${RESET}"
+    echo ""
+    echo -e "  Relancer ce script : ${CYAN}sudo bash check_install.sh${RESET}"
 fi
 echo -e "${BOLD}══════════════════════════════════════════════${RESET}"
 echo ""

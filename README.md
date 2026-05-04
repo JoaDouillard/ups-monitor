@@ -27,15 +27,24 @@ Application de monitoring temps réel d'onduleur via SNMPv3, avec dashboard web,
 
 ## Prérequis
 
-- XenServer / XCP-ng (dom0 CentOS 7) **ou** Debian/Ubuntu
-- Accès root
-- Connexion réseau entre le serveur et l'onduleur
-- SNMPv3 configuré sur la carte réseau Eaton (via son interface web)
+| | XenServer / XCP-ng | Ubuntu / Debian |
+|---|---|---|
+| OS | dom0 CentOS 7 | Ubuntu 20.04+ / Debian 11+ |
+| Accès | root | sudo ou root |
+| Python | installé auto via dépôt IUS | installé auto via apt |
+| SSH pour shutdown VMs | `openssh-clients` + `sshpass` (yum) | `openssh-client` + `sshpass` (apt) |
+
+Prérequis communs :
+- Accès root/sudo
+- Connexion réseau vers l'onduleur
+- SNMPv3 configuré sur la carte Eaton Network-M3
 - Git installé
 
 ---
 
-## Installation rapide
+## Installation
+
+> **Le script `check_install.sh` détecte automatiquement la plateforme (XenServer ou Ubuntu) et adapte toutes les commandes en conséquence. Un seul script pour les deux.**
 
 ### 1. Cloner le dépôt
 
@@ -44,21 +53,28 @@ git clone https://github.com/JoaDouillard/ups-monitor.git /opt/ups-monitor
 cd /opt/ups-monitor
 ```
 
-### 2. Vérifier et installer les dépendances
+### 2. Installer toutes les dépendances
 
 ```bash
-bash check_install.sh
+sudo bash check_install.sh
 ```
 
-Ce script vérifie et installe automatiquement :
-- Python 3.8+ (via le dépôt IUS sur XenServer/CentOS 7)
-- L'environnement virtuel Python
-- Tous les paquets listés dans `requirements.txt`
-- Vérifie que le fichier `.env` est correctement renseigné
+Ce script fait **tout automatiquement** selon la plateforme détectée :
+
+| Étape | XenServer (CentOS 7 / yum) | Ubuntu/Debian (apt) |
+|---|---|---|
+| Python | `python3.8` via dépôt IUS | `python3` (déjà disponible) |
+| venv | inclus avec python3.8 | `python3.X-full` |
+| SSH shutdown | `openssh-clients` + `sshpass` | `openssh-client` + `sshpass` |
+| Service | `/etc/systemd/system/ups-monitor.service` | idem |
 
 ### 3. Configurer l'application
 
 ```bash
+# Générer une SECRET_KEY
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Editer la configuration
 nano /opt/ups-monitor/.env
 ```
 
@@ -70,13 +86,8 @@ Variables **obligatoires** :
 | `SNMP_USER` | Nom d'utilisateur SNMPv3 | `upsnms` |
 | `SNMP_AUTH_KEY` | Clé d'authentification SHA | `MonMotDePasseAuth` |
 | `SNMP_PRIV_KEY` | Clé de chiffrement AES | `MonMotDePassePriv` |
-| `SECRET_KEY` | Clé secrète JWT (aléatoire) | voir commande ci-dessous |
+| `SECRET_KEY` | Clé secrète JWT (générée ci-dessus) | `a3f8c2...` |
 | `ADMIN_PASSWORD` | Mot de passe de l'interface web | `UnBonMotDePasse` |
-
-Générer une `SECRET_KEY` :
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
 
 Variables **optionnelles** :
 
@@ -90,15 +101,17 @@ Variables **optionnelles** :
 | `SHUTDOWN_DELAY_SECONDS` | Délai avant arrêt VMs | `60` |
 | `HISTORY_RETENTION_DAYS` | Durée de rétention de l'historique | `30` |
 
-### 4. Déployer le service systemd
+> **Note XenServer dom0** : si `XENSERVER_HOST=127.0.0.1` (l'onduleur arrête la machine locale),
+> configurez SSH sans mot de passe sur la machine elle-même :
+> ```bash
+> ssh-keygen -t rsa -N ''
+> cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+> ```
+
+### 4. Démarrer
 
 ```bash
-bash deploy-xenserver.sh
-```
-
-### 5. Démarrer
-
-```bash
+sudo bash check_install.sh   # relancer pour vérifier la config .env et démarrer le service
 systemctl start ups-monitor
 systemctl status ups-monitor
 ```
