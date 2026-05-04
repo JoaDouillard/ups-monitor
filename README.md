@@ -75,7 +75,7 @@ Variables **obligatoires** :
 
 Générer une `SECRET_KEY` :
 ```bash
-python3.8 -c "import secrets; print(secrets.token_hex(32))"
+python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 Variables **optionnelles** :

@@ -287,7 +287,7 @@ echo ""
 # ─────────────────────────────────────────────
 # 6. Fichier .env
 # ─────────────────────────────────────────────
-echo -e "${BOLD}[6/6] Configuration (.env)${RESET}"
+echo -e "${BOLD}[6/7] Configuration (.env)${RESET}"
 
 if [ -f "$APP_DIR/.env" ]; then
     ok ".env trouvé : $APP_DIR/.env"
@@ -319,6 +319,50 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────
+# 7. Service systemd
+# ─────────────────────────────────────────────
+echo -e "${BOLD}[7/7] Service systemd${RESET}"
+
+SERVICE_FILE="$APP_DIR/ups-monitor.service"
+SYSTEMD_DEST="/etc/systemd/system/ups-monitor.service"
+
+if [ ! -f "$SERVICE_FILE" ]; then
+    fail "Fichier ups-monitor.service introuvable dans $APP_DIR"
+    ERRORS=$((ERRORS + 1))
+elif ! command -v systemctl &>/dev/null; then
+    warn "systemctl introuvable — service non installé (environnement sans systemd ?)"
+else
+    # Génère le service avec le bon chemin venv dynamique
+    cat > "$SYSTEMD_DEST" << EOF
+[Unit]
+Description=UPS Monitor — Eaton 5PX 3000i RT2U G2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+ExecStart=$APP_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1 --log-level info
+Restart=on-failure
+RestartSec=10s
+StartLimitInterval=60s
+StartLimitBurst=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable ups-monitor 2>/dev/null || true
+    ok "Service ups-monitor installé et activé"
+    ok "Fichier : $SYSTEMD_DEST"
+fi
+echo ""
+
+# ─────────────────────────────────────────────
 # Résumé final
 # ─────────────────────────────────────────────
 echo -e "${BOLD}══════════════════════════════════════════════${RESET}"
@@ -332,6 +376,7 @@ if [ "$ERRORS" -eq 0 ]; then
 else
     echo -e "${YELLOW}${BOLD}  ⚠  $ERRORS problème(s) à corriger avant le démarrage${RESET}"
     echo ""
+    echo -e "  Générer une SECRET_KEY : ${CYAN}python3 -c \"import secrets; print(secrets.token_hex(32))\"${RESET}"
     echo -e "  Relancez ce script après correction : ${CYAN}bash check_install.sh${RESET}"
 fi
 echo -e "${BOLD}══════════════════════════════════════════════${RESET}"
