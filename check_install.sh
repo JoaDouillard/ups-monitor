@@ -101,25 +101,29 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────
-# 3. Module venv
+# 3. Module venv (avec paquet système si besoin)
 # ─────────────────────────────────────────────
 echo -e "${BOLD}[3/6] Module venv (environnement virtuel)${RESET}"
 
-if "$PYTHON_BIN" -m venv --help &>/dev/null 2>&1; then
-    ok "Module venv disponible"
-else
-    warn "Module venv manquant — installation..."
-    if [ "$PKG_MGR" = "yum" ]; then
-        yum install -y python38-libs 2>/dev/null || yum install -y python3-venv 2>/dev/null || true
-    elif [ "$PKG_MGR" = "apt" ]; then
-        apt-get install -y -q python3-venv
-    fi
-    if "$PYTHON_BIN" -m venv --help &>/dev/null 2>&1; then
-        ok "Module venv installé"
+if [ "$PKG_MGR" = "apt" ]; then
+    # Sur Debian/Ubuntu, le module venv est disponible mais le paquet
+    # python3.X-venv doit être installé pour que le venv soit fonctionnel
+    PY_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    VENV_PKG="python${PY_VERSION}-venv"
+    if dpkg -l "$VENV_PKG" &>/dev/null 2>&1; then
+        ok "Paquet $VENV_PKG déjà installé"
     else
-        fail "Impossible d'activer venv. Vérifiez votre installation Python."
-        ERRORS=$((ERRORS + 1))
+        info "Installation de $VENV_PKG (requis sur Ubuntu/Debian)..."
+        apt-get update -q
+        apt-get install -y -q "$VENV_PKG" python3-pip
+        ok "Paquet $VENV_PKG installé"
     fi
+elif [ "$PKG_MGR" = "yum" ]; then
+    if ! "$PYTHON_BIN" -m venv --help &>/dev/null 2>&1; then
+        warn "Module venv manquant — installation..."
+        yum install -y python38-libs 2>/dev/null || true
+    fi
+    ok "Module venv disponible"
 fi
 echo ""
 
@@ -128,16 +132,27 @@ echo ""
 # ─────────────────────────────────────────────
 echo -e "${BOLD}[4/6] Environnement virtuel${RESET}"
 
+PIP="$VENV_DIR/bin/pip"
+PYTHON_VENV="$VENV_DIR/bin/python"
+
+# Détecte un venv cassé (répertoire présent mais pip absent)
+if [ -d "$VENV_DIR" ] && [ ! -f "$PIP" ]; then
+    warn "Venv existant mais cassé (pip absent) — reconstruction..."
+    rm -rf "$VENV_DIR"
+fi
+
 if [ ! -d "$VENV_DIR" ]; then
     info "Création du virtualenv dans $VENV_DIR..."
     "$PYTHON_BIN" -m venv "$VENV_DIR"
+    if [ ! -f "$PIP" ]; then
+        fail "Le virtualenv a été créé mais pip est absent."
+        fail "Essayez : apt install python3-pip puis relancez ce script."
+        exit 1
+    fi
     ok "Virtualenv créé"
 else
     ok "Virtualenv existant : $VENV_DIR"
 fi
-
-PIP="$VENV_DIR/bin/pip"
-PYTHON_VENV="$VENV_DIR/bin/python"
 
 # Mise à jour pip
 info "Mise à jour de pip..."
