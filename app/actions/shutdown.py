@@ -7,6 +7,7 @@ Séquence :
   3. Arrêt de toutes les VMs en cours d'exécution
   4. Log du résultat
 """
+from __future__ import annotations
 
 import asyncio
 import logging

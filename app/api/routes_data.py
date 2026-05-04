@@ -2,12 +2,17 @@
 Endpoints API pour les données UPS : statut temps réel, historique,
 alertes, actions, et WebSocket live.
 """
+from __future__ import annotations
 
 import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Any
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # Python 3.8
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel

@@ -2,6 +2,7 @@
 Poller SNMP asynchrone — SNMPv3 avec authentification SHA et chiffrement AES.
 Utilise pysnmp (lextudio fork, v6.x).
 """
+from __future__ import annotations
 
 import asyncio
 import logging

@@ -3,9 +3,10 @@ Registre des OIDs SNMP de l'onduleur Eaton 5PX 3000i RT2U G2.
 Basé sur XUPS-MIB (enterprise .1.3.6.1.4.1.534.1) et validé
 contre result.xml (export réel des requêtes SNMP sur l'onduleur).
 """
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, List, Dict
 
 
 @dataclass

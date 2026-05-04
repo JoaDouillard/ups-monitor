@@ -1,9 +1,13 @@
 """
 Authentification JWT — login / logout / vérification du token.
 """
+from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from typing import Annotated
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # Python 3.8
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
