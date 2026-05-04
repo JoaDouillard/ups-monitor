@@ -17,17 +17,13 @@ from pysnmp.hlapi.v3arch.asyncio import (
     ObjectType,
     ObjectIdentity,
     get_cmd,
-)
-from pysnmp.proto.rfc1902 import OctetString, Integer, Gauge32, Counter32, TimeTicks
-
-# Protocoles d'authentification disponibles
-from pysnmp.hlapi import (
     usmHMACSHAAuthProtocol,
     usmHMAC128SHA224AuthProtocol,
     usmHMAC192SHA256AuthProtocol,
     usmAesCfb128Protocol,
     usmDESPrivProtocol,
 )
+from pysnmp.proto.rfc1902 import OctetString, Integer, Gauge32, Counter32, TimeTicks
 
 from app.config import settings
 from app.poller.oids import POLLING_OIDS, INFO_OIDS, OIDDef
