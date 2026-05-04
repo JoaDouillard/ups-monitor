@@ -247,8 +247,8 @@ while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ ^#.*$ ]] && continue
     [[ -z "${line// }" ]] && continue
 
-    # Extrait le nom du paquet (avant >=, <=, ==, ~=, >, <)
-    pkg_name=$(echo "$line" | sed 's/[><=!~].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+    # Extrait le nom du paquet (avant >=, <=, ==, ~=, >, < et [extras])
+    pkg_name=$(echo "$line" | sed 's/[><=!~].*//' | sed 's/\[.*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
 
     if echo "$INSTALLED" | grep -qi "^${pkg_name}"; then
         installed_ver=$(echo "$INSTALLED" | grep -i "^${pkg_name}" | head -1 | cut -d= -f3)
@@ -271,7 +271,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
 
     # Vérification post-install
     for pkg in "${MISSING[@]}"; do
-        pkg_name=$(echo "$pkg" | sed 's/[><=!~].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+        pkg_name=$(echo "$pkg" | sed 's/[><=!~].*//' | sed 's/\[.*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
         if "$PIP" list --format=freeze 2>/dev/null | grep -qi "^${pkg_name}"; then
             ok "$pkg_name → installé avec succès"
         else
