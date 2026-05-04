@@ -186,9 +186,38 @@ else
     ok "Virtualenv existant : $VENV_DIR"
 fi
 
+# ── Détection proxy SSL (certificat auto-signé en entreprise) ──────────────
+# Teste si pip peut joindre PyPI normalement.
+# Si SSL échoue → active --trusted-host sur tous les pip install suivants
+# et écrit un pip.conf persistant dans le venv.
+PIP_FLAGS=""
+
+SSL_TEST=$("$PIP" install --dry-run pip 2>&1 || true)
+if echo "$SSL_TEST" | grep -q "SSLError\|CERTIFICATE_VERIFY_FAILED\|certificate verify failed"; then
+    warn "Proxy SSL détecté (certificat auto-signé) — activation du mode trusted-host"
+    PIP_FLAGS="--trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"
+
+    # Ecrit pip.conf dans le venv pour que ce soit persistant
+    mkdir -p "$VENV_DIR/pip"
+    cat > "$VENV_DIR/pip/pip.conf" << 'PIPCONF'
+[global]
+trusted-host =
+    pypi.org
+    pypi.python.org
+    files.pythonhosted.org
+PIPCONF
+    # pip cherche aussi dans ce chemin selon la version
+    mkdir -p "$VENV_DIR/etc/pip"
+    cp "$VENV_DIR/pip/pip.conf" "$VENV_DIR/etc/pip/pip.conf"
+    # Et dans le répertoire standard pip
+    export PIP_TRUSTED_HOST="pypi.org pypi.python.org files.pythonhosted.org"
+    ok "Mode trusted-host activé (proxy SSL contourné)"
+fi
+
 # Mise à jour pip
 info "Mise à jour de pip..."
-"$PIP" install --quiet --upgrade pip
+# shellcheck disable=SC2086
+"$PIP" install --quiet --upgrade pip $PIP_FLAGS
 ok "pip $($PIP --version | awk '{print $2}')"
 echo ""
 
@@ -206,19 +235,16 @@ fi
 INSTALLED=$("$PIP" list --format=freeze 2>/dev/null | tr '[:upper:]' '[:lower:]')
 
 MISSING=()
-OUTDATED=()
 
 while IFS= read -r line || [ -n "$line" ]; do
-    # Ignore commentaires et lignes vides
     [[ "$line" =~ ^#.*$ ]] && continue
     [[ -z "${line// }" ]] && continue
 
     # Extrait le nom du paquet (avant >=, <=, ==, ~=, >, <)
     pkg_name=$(echo "$line" | sed 's/[><=!~].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
-    pkg_lower=$(echo "$pkg_name" | tr '[:upper:]' '[:lower:]')
 
-    if echo "$INSTALLED" | grep -qi "^${pkg_lower}"; then
-        installed_ver=$(echo "$INSTALLED" | grep -i "^${pkg_lower}" | head -1 | cut -d= -f3)
+    if echo "$INSTALLED" | grep -qi "^${pkg_name}"; then
+        installed_ver=$(echo "$INSTALLED" | grep -i "^${pkg_name}" | head -1 | cut -d= -f3)
         ok "$pkg_name ($installed_ver)"
     else
         fail "$pkg_name → NON INSTALLÉ"
@@ -232,18 +258,17 @@ echo ""
 if [ ${#MISSING[@]} -gt 0 ]; then
     warn "${#MISSING[@]} paquet(s) manquant(s) — installation en cours..."
     echo ""
-    "$PIP" install "${MISSING[@]}"
+    # shellcheck disable=SC2086
+    "$PIP" install $PIP_FLAGS "${MISSING[@]}"
     echo ""
 
     # Vérification post-install
-    STILL_MISSING=0
     for pkg in "${MISSING[@]}"; do
         pkg_name=$(echo "$pkg" | sed 's/[><=!~].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
         if "$PIP" list --format=freeze 2>/dev/null | grep -qi "^${pkg_name}"; then
             ok "$pkg_name → installé avec succès"
         else
             fail "$pkg_name → échec de l'installation !"
-            STILL_MISSING=$((STILL_MISSING + 1))
             ERRORS=$((ERRORS + 1))
         fi
     done
