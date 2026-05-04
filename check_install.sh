@@ -106,17 +106,26 @@ echo ""
 echo -e "${BOLD}[3/6] Module venv (environnement virtuel)${RESET}"
 
 if [ "$PKG_MGR" = "apt" ]; then
-    # Sur Debian/Ubuntu, le module venv est disponible mais le paquet
-    # python3.X-venv doit être installé pour que le venv soit fonctionnel
+    # Sur Ubuntu/Debian, python3.X-venv seul ne suffit pas toujours :
+    # ensurepip peut être absent. python3.X-full ou python3-full est fiable.
     PY_VERSION=$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    FULL_PKG="python${PY_VERSION}-full"
     VENV_PKG="python${PY_VERSION}-venv"
-    if dpkg -l "$VENV_PKG" &>/dev/null 2>&1; then
-        ok "Paquet $VENV_PKG déjà installé"
+
+    # Essaie python3.X-full en priorité (inclut venv + ensurepip)
+    if dpkg -l "$FULL_PKG" &>/dev/null 2>&1; then
+        ok "Paquet $FULL_PKG déjà installé"
     else
-        info "Installation de $VENV_PKG (requis sur Ubuntu/Debian)..."
+        info "Installation de $FULL_PKG (venv + ensurepip complet)..."
         apt-get update -q
-        apt-get install -y -q "$VENV_PKG" python3-pip
-        ok "Paquet $VENV_PKG installé"
+        if apt-get install -y -q "$FULL_PKG" 2>/dev/null; then
+            ok "Paquet $FULL_PKG installé"
+        else
+            # Fallback : python3.X-venv + python3-pip
+            info "$FULL_PKG indisponible, fallback sur $VENV_PKG + python3-pip..."
+            apt-get install -y -q "$VENV_PKG" python3-pip python3-setuptools
+            ok "Paquets $VENV_PKG + python3-pip installés"
+        fi
     fi
 elif [ "$PKG_MGR" = "yum" ]; then
     if ! "$PYTHON_BIN" -m venv --help &>/dev/null 2>&1; then
@@ -143,13 +152,36 @@ fi
 
 if [ ! -d "$VENV_DIR" ]; then
     info "Création du virtualenv dans $VENV_DIR..."
-    "$PYTHON_BIN" -m venv "$VENV_DIR"
-    if [ ! -f "$PIP" ]; then
-        fail "Le virtualenv a été créé mais pip est absent."
-        fail "Essayez : apt install python3-pip puis relancez ce script."
-        exit 1
+
+    # Tentative 1 : création normale (avec pip intégré via ensurepip)
+    if "$PYTHON_BIN" -m venv "$VENV_DIR" 2>/dev/null && [ -f "$PIP" ]; then
+        ok "Virtualenv créé"
+
+    # Tentative 2 : sans pip intégré, bootstrap manuel via get-pip.py
+    else
+        warn "ensurepip indisponible — bootstrap pip manuel..."
+        rm -rf "$VENV_DIR"
+        "$PYTHON_BIN" -m venv --without-pip "$VENV_DIR"
+
+        if command -v curl &>/dev/null; then
+            curl -sSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+        elif command -v wget &>/dev/null; then
+            wget -qO /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py
+        else
+            fail "curl et wget sont introuvables. Impossible de bootstrapper pip."
+            fail "Installez curl : apt install curl  puis relancez ce script."
+            exit 1
+        fi
+
+        "$VENV_DIR/bin/python" /tmp/get-pip.py --quiet
+        rm -f /tmp/get-pip.py
+
+        if [ ! -f "$PIP" ]; then
+            fail "Échec du bootstrap pip. Vérifiez votre connexion internet."
+            exit 1
+        fi
+        ok "Virtualenv créé (pip bootstrappé manuellement)"
     fi
-    ok "Virtualenv créé"
 else
     ok "Virtualenv existant : $VENV_DIR"
 fi
